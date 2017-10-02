@@ -1,5 +1,4 @@
 MESSAGE_LENGTH = 200
-
 #### Client messages ####
 
 # Message printed when a client can't connect to the server host and port that were passed in.

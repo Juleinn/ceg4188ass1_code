@@ -1,6 +1,7 @@
 import sys
 import socket
 import thread
+import utils
 
 
 
@@ -26,11 +27,18 @@ class Channel:
 		self.clients = {} # no clients at first
 	def addClient(self, client):
 		print("Adding client " + client.name + " to channel")
+		# broadcast the joins of clients
+		self.broadcast(utils.SERVER_CLIENT_JOINED_CHANNEL.format(client.name).ljust(utils.MESSAGE_LENGTH))
 		self.clients[client.name] = client
 	def logOut(self, client):
-		# This will log clients out of the channel based on name only
-		# Clients with duplicate names will be logged out at the same time
-		self.clients.pop(client.name, None)
+		#log out only if logged in (prevents inaccurate loggout messages)
+		if client.name in self.clients.keys():
+			# broadcast the leaving of the client
+			self.broadcast(utils.SERVER_CLIENT_LEFT_CHANNEL.format(client.name).ljust(utils.MESSAGE_LENGTH))
+			# This will log clients out of the channel based on name only
+			# Clients with duplicate names will be logged out at the same time
+			self.clients.pop(client.name, None)
+
 	def broadcast(self, message):
 		# this broadcasts the given message to all clients logged into the channel
 		for c in self.clients:
@@ -46,45 +54,55 @@ def clientThread(client):
 	global clients
 	# loop that waits for client to send messages
 	while True:
-		# receive client data (max 200 chars). Do not perform length check as this will be done
+		# receive client data (max utils.MESSAGE_LENGTH chars). Do not perform length check as this will be done
 		# on client side, and ctrl messages may be shorter
-		ctrl = client.csock.recv(200).decode()
-		print("received data : " + ctrl)
+		ctrl = client.csock.recv(utils.MESSAGE_LENGTH).decode()
+		if len(ctrl) == 0:	# discard empty messages
+			continue
+
 		if ctrl[0] == '/':	# control message
 			# test control type
+			print("ctrl = " + ctrl)
 			if ctrl[:len("/join")] == "/list":
 				# return a message containing a list of channels
-				# must be 200 char aligned like every message
+				# must be utils.MESSAGE_LENGTH char aligned like every message
 				if len(channels) != 0:
 					chList = reduce(lambda a, b: a + "\n" + b, channels.keys())
 					printChannels()
 				else:
 					chList = " "
 
-				# add padding spaces until chList is 200 characters aligned
-				while len(chList)%200 != 0:
+				# add padding spaces until chList is utils.MESSAGE_LENGTH characters aligned
+				while len(chList)%utils.MESSAGE_LENGTH != 0:
 					chList += " "
 				# send the result
 				client.csock.send(chList.encode())
+
 			elif ctrl[:len("/join")] == "/join":
 				# check for channel availability
 				chName = ctrl[len("/join "):]
-				print("chName = " + chName)
-				if chName in channels.keys():
-					print("Logging " + client.name + " in " + chName)
-					# Log out of all channels
-					logOutAll(client)
-					# log in
-					channels[chName].addClient(client)
+				if chName.strip() == "":
+					# no name channel
+					print("No channel name given")
+					client.csock.send(utils.SERVER_JOIN_REQUIRES_ARGUMENT.ljust(utils.MESSAGE_LENGTH))
 				else:
-					#reply with an error message
-					print("Channel does not exist")
-
+					print("chName = " + chName)
+					if chName in channels.keys():
+						print("Logging " + client.name + " in " + chName)
+						# Log out of all channels
+						logOutAll(client)
+						# log in
+						channels[chName].addClient(client)
+					else:
+						#reply with an error message
+						client.csock.send(utils.SERVER_NO_CHANNEL_EXISTS.format(chName).ljust(utils.MESSAGE_LENGTH))
+						print("Channel does not exist")
 
 
 			elif ctrl[:len("/create")] == "/create":
 				# create new channel, if no name provided reply with error message
-				if len(ctrl) == len("/create"): # no channel name
+				if ctrl[len("/create"):].strip() == "": # no channel name
+					client.csock.send(utils.SERVER_CREATE_REQUIRES_ARGUMENT.ljust(utils.MESSAGE_LENGTH))
 					print("Unable to create : invalid name")
 				else:
 					# create corresponding channel
@@ -92,6 +110,7 @@ def clientThread(client):
 					chName = ctrl[len("/create "):]
 					# check for already existing key
 					if chName in channels.keys():
+						client.csock.send(utils.SERVER_CHANNEL_EXISTS.format(chName).ljust(utils.MESSAGE_LENGTH))
 						print("Channel already exists")
 					else:
 						print("Creating channel " + chName)
@@ -101,17 +120,21 @@ def clientThread(client):
 						channels[chName].addClient(client)
 
 			else:
-				pass
+				# send back invalid control message message
+				print("Invalid ctrl message")
+				client.csock.send(utils.SERVER_INVALID_CONTROL_MESSAGE.format(ctrl).ljust(utils.MESSAGE_LENGTH))
 
 		else: # normal message to be broadcasted to the channel
 			# broadcast the message to all in the channel	
 			# find the channel client is logged in
+			logged = False
 			for e in channels:
 				if client.name in channels[e].clients:
 					channels[e].broadcast(ctrl)
-
-def joinClient(channel, client):
-	pass
+					logged = True # check if logged in a channel
+			if not logged:
+				print("Discarding data from non logged client " + client.name)
+				client.csock.send(utils.SERVER_CLIENT_NOT_IN_CHANNEL.ljust(utils.MESSAGE_LENGTH))
 
 #debug
 def printChannels():
@@ -142,7 +165,7 @@ s.listen(10)
 while True:
 	csock, caddr = s.accept()
 	# receive first message to get client name
-	name = csock.recv(200)
+	name = csock.recv(utils.MESSAGE_LENGTH)
 	print("Client " + name + " connected.")
 	# add client to current client list
 	clients[name] = Client(csock, caddr, name)

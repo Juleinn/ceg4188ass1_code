@@ -7,9 +7,12 @@ if len(sys.argv) != 4:
 	print("Invalid number of args.\nUse : python client.py NAME IP PORT")
 	quit()
 
-
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect((sys.argv[2], int(sys.argv[3])))
+try:
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.connect((sys.argv[2], int(sys.argv[3])))
+except socket.error:
+	print(utils.CLIENT_CANNOT_CONNECT.format(sys.argv[2], sys.argv[3]))
+	quit()
 
 name = sys.argv[1]
 
@@ -20,7 +23,13 @@ s.send(name.encode())
 # time
 def receiverThread():
 	while True:
-		data = s.recv(200);
+		try:	
+			data = s.recv(200);
+		except socket.error:
+			print(utils.CLIENT_SERVER_DISCONNECTED.format(sys.argv[2], sys.argv[3]))
+			s.close()
+			quit()
+
 		while len(data) < 200:
 			data += s.recv(200 - len(data))
 			# now we have for sure a 200 char piece of data
@@ -35,11 +44,19 @@ thread.start_new_thread(receiverThread, ())
 while True:
 	text = raw_input(utils.CLIENT_MESSAGE_PREFIX)
 	# do not pad ctrl data as it will be interpreted by the server
+	if len(text) == 0: # discards empty messages
+		continue
 	if text[0] != '/':
 		# add client name now, this will allow for coherent padding
 		text = '[' + name + ']' + text
 		while len(text) < 200:
 			text += ' '
-	s.send(text.encode())
+
+	try:	
+		s.send(text.encode())
+	except socket.error:
+		print(utils.CLIENT_SERVER_DISCONNECTED.format(sys.argv[2], sys.argv[3]))
+		s.close()
+		quit()
 
 s.close()
