@@ -60,7 +60,7 @@ class ChatClientSplitMessages:
 
     # Join a "split_messages" channel. This code assumes that the channel
     # already exists.
-    self.send_split_message(client_socket, "/join split_messages")
+    self.send_split_message(client_socket, "/join split_messages") 
 
     # Send the same message 10 times.
     message = ("I think that I shall never see a structure more wasteful " +

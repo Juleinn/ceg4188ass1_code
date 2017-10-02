@@ -16,7 +16,7 @@ except socket.error:
 
 name = sys.argv[1]
 
-s.send(name.encode())
+s.send(name.ljust(200).encode())
 
 # this function's role is to receive the data, buffer it if needed and display it
 # this function will be run in a separate thread to allow for data sending at the same
@@ -30,9 +30,10 @@ def receiverThread():
 			s.close()
 			quit()
 
+		# buffering on the client side in case there was a spliting server (unlikely)
 		while len(data) < 200:
 			data += s.recv(200 - len(data))
-			# now we have for sure a 200 char piece of data
+
 		print(utils.CLIENT_WIPE_ME + "\r" + data.decode().strip())
 		# reset the terminal 'ME' output
 		print utils.CLIENT_MESSAGE_PREFIX,
@@ -48,9 +49,8 @@ while True:
 		continue
 	if text[0] != '/':
 		# add client name now, this will allow for coherent padding
-		text = '[' + name + ']' + text
-		while len(text) < 200:
-			text += ' '
+		text = "[" + name + '] ' + text
+	text = text.ljust(200) # pad to a 200 char msg
 
 	try:	
 		s.send(text.encode())
