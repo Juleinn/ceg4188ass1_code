@@ -2,20 +2,26 @@ import sys
 import socket
 import thread
 import utils
-
-
+import signal
 
 #global variable storing the clients currently connected to the server
 clients = {}
 # global variable storing the channels for the server
 channels = {}
 
+# allows to give a unique ID to each client
+# this way two clients can have the same name
+conn_number = 0
+
 class Client:
 	def __init__(self, csock, addr, name):
+		global conn_number
 		self.csock = csock
 		self.addr = addr
 		self.name = name
 		self.channel = None
+		self.id = conn_number
+		conn_number += 1
 	def sendMessage(self, message):
 		# this sends the given message to the current client
 		try:
@@ -30,18 +36,18 @@ class Channel:
 		self.name = name
 		self.clients = {} # no clients at first
 	def addClient(self, client):
-		# print("Adding client " + client.name + " to channel")
+		print("Adding client " + client.name + " to channel")
 		# broadcast the joins of clients
 		self.broadcast(utils.SERVER_CLIENT_JOINED_CHANNEL.format(client.name).ljust(utils.MESSAGE_LENGTH), client)
-		self.clients[client.name] = client
+		self.clients[client.id] = client
 	def logOut(self, client):
 		#log out only if logged in (prevents inaccurate loggout messages)
-		if client.name in self.clients.keys():
+		if client.id in self.clients.keys():
 			# broadcast the leaving of the client
 			self.broadcast(utils.SERVER_CLIENT_LEFT_CHANNEL.format(client.name).ljust(utils.MESSAGE_LENGTH), client)
 			# This will log clients out of the channel based on name only
 			# Clients with duplicate names will be logged out at the same time
-			self.clients.pop(client.name, None)
+			self.clients.pop(client.id, None)
 
 	def broadcast(self, message, srcClient):
 		# this broadcasts the given message to all clients logged into the channel
@@ -49,8 +55,8 @@ class Channel:
 		# this can throw an exception if logging out while broadcasting
 		try:
 			for c in self.clients:
-				if clients[c] is not srcClient:
-					clients[c].sendMessage(message)
+				if self.clients[c] is not srcClient:
+					self.clients[c].sendMessage(message)
 		except:
 			pass
 			
@@ -63,18 +69,30 @@ if len(sys.argv) != 2:
 def bufferMessage(socket):
 	msg = ""
 	while len(msg) < 200:
-		msg += socket.recv(utils.MESSAGE_LENGTH - len(msg)).decode()
+		tmp = socket.recv(utils.MESSAGE_LENGTH - len(msg)).decode()
+		# empty recv means client disconnected 
+		# "forward emptyness" to allow for disconection detection
+		if tmp == "":
+			return ""
+		else:
+			msg += tmp
 	return msg
 
 # function that will be run in one thread per client
 def clientThread(client):
 	global channels
 	global clients
+	running = True
 	# loop that waits for client to send messages
 	while True:
 		# receive client data (max utils.MESSAGE_LENGTH chars). Do not perform length check as this will be done
 		# on client side, and ctrl messages may be shorter
 		ctrl = bufferMessage(client.csock)
+		if ctrl == "": # empty message, client disconnected
+			logOutAll(client)
+			running = False
+			client.csock.close()
+			break
 
 		if ctrl[0] == '/':	# control message
 			ctrl = ctrl.strip() # get rid of the padding for the control messages
@@ -105,7 +123,6 @@ def clientThread(client):
 				else:
 					# print("chName = " + chName)
 					if chName in channels.keys():
-						# print("Logging " + client.name + " in " + chName)
 						# Log out of all channels
 						logOutAll(client)
 						# log in
@@ -146,11 +163,11 @@ def clientThread(client):
 			# find the channel client is logged in
 			logged = False
 			for e in channels:
-				if client.name in channels[e].clients:
+				if client.id in channels[e].clients:
 					channels[e].broadcast(ctrl, client)
 					logged = True # check if logged in a channel
 			if not logged:
-				print("Discarding data from non logged client " + client.name)
+				print("Discarding data from non logged client " + client.name + ":", client.id)
 				client.sendMessage(utils.SERVER_CLIENT_NOT_IN_CHANNEL.ljust(utils.MESSAGE_LENGTH))
 
 #debug
@@ -158,7 +175,7 @@ def printChannels():
 	for k in channels.keys():
 		print k + " : ",
 		if len(channels[k].clients.keys()) != 0:
-			print(reduce(lambda a, b: a + "," + b, channels[k].clients.keys()))
+			print(reduce(lambda a, b: str(a) + "," + str(b), channels[k].clients.keys()))
 		else:
 			print
 
@@ -169,23 +186,40 @@ def logOutAll(user):
 		channels[e].logOut(user)
 
 
-
+# disconnects all clients 
+def disconnectAll():
+	for e in clients:
+		clients[e].csock.close()
+	s.close()
 
 # actually start the server's listenning 
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# for fast debug, allow reuse of port during TIME_WAIT
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
 s.bind(('localhost', int(sys.argv[1])))
 
+# max 10 connections between 2 accepts()
 s.listen(10)
 
 while True:
-	csock, caddr = s.accept()
+	try:
+		csock, caddr = s.accept()
+	except: 
+		# exceptions caused here are due to system signals (SIGINT)
+		# probably the server being quit
+		# must properly disconnect all clients
+		disconnectAll()
+		quit()
+
+
 	# receive first message to get client name
 	name = bufferMessage(csock).strip()
 	print("Client " + name + " connected.")
 	# add client to current client list
-	clients[name] = Client(csock, caddr, name)
+	newClient = Client(csock, caddr, name)
+	clients[conn_number] = newClient
 	# start a thread for clients incomming messages
-	thread.start_new_thread(clientThread, (clients[name],))
+	thread.start_new_thread(clientThread, (newClient,))
 
