@@ -1,3 +1,7 @@
+# file server.py 
+# Alexandre Plante, 7908179, Anton Claes, 0300042110
+# CEG4188 Assignment #1
+# october 8th, 2017 
 import sys
 import socket
 import thread

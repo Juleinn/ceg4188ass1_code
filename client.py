@@ -1,7 +1,7 @@
 # file client.py 
-# Alexandre Plante, Anton Claes
+# Alexandre Plante, 7908179, Anton Claes, 0300042110
 # CEG4188 Assignment #1
-# october 8th, 2017
+# october 8th, 2017 
 import socket
 import sys
 import utils
